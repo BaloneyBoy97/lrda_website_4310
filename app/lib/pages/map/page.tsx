@@ -1,4 +1,5 @@
 "use client";
+
 import React, { useState, useRef, useEffect } from "react";
 import SearchBarUI from "@/app/lib/components/search_bar_ui";
 import { Note, CombinedResult } from "../../../types";
@@ -13,14 +14,14 @@ interface SearchBarMapProps {
   ) => void;
   onNotesSearch: (searchText: string) => void;
   isLoaded: boolean;
-  filteredNotes?: Note[]; // make optional
+  filteredNotes: Note[];
 }
 
 const SearchBarMap: React.FC<SearchBarMapProps> = ({
   onSearch,
   onNotesSearch,
   isLoaded,
-  filteredNotes = [], // ✅ default fallback
+  filteredNotes = [],
 }) => {
   const [searchText, setSearchText] = useState("");
   const [suggestions, setSuggestions] = useState<google.maps.places.AutocompletePrediction[]>([]);
@@ -90,10 +91,7 @@ const SearchBarMap: React.FC<SearchBarMapProps> = ({
     result: google.maps.places.PlaceResult | null,
     status: google.maps.places.PlacesServiceStatus
   ) => {
-    if (
-      status === google.maps.places.PlacesServiceStatus.OK &&
-      result?.geometry?.location
-    ) {
+    if (status === google.maps.places.PlacesServiceStatus.OK && result?.geometry?.location) {
       const lat = result.geometry.location.lat();
       const lng = result.geometry.location.lng();
       onSearch(result.formatted_address || "", lat, lng);
