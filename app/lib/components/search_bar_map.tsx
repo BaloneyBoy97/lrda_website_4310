@@ -1,6 +1,7 @@
 import React from "react";
 import SearchBarUI from "./search_bar_ui";
 import { Note, CombinedResult } from "../../types";
+import { useGoogleMaps } from "../utils/GoogleMapsContext"; // ✅ new
 
 declare global {
   interface Window {
@@ -23,16 +24,12 @@ type SearchBarMapProps = {
 type SearchBarMapState = {
   searchText: string;
   suggestions: google.maps.places.AutocompletePrediction[];
-  isDropdownVisible: boolean; // Tracks whether the dropdown is visible
-  loading: boolean; // loading indicator
+  isDropdownVisible: boolean;
+  loading: boolean;
 };
 
-class SearchBarMap extends React.Component<
-  SearchBarMapProps,
-  SearchBarMapState
-> {
-  private autocompleteService: google.maps.places.AutocompleteService | null =
-    null;
+class SearchBarMap extends React.Component<SearchBarMapProps, SearchBarMapState> {
+  private autocompleteService: google.maps.places.AutocompleteService | null = null;
   private dropdownRef = React.createRef<HTMLUListElement>();
 
   constructor(props: SearchBarMapProps) {
@@ -41,14 +38,13 @@ class SearchBarMap extends React.Component<
       searchText: "",
       suggestions: [],
       isDropdownVisible: false,
-      loading: false, //loading state
+      loading: false,
     };
   }
 
   componentDidMount() {
     if (window.google?.maps?.places && !this.autocompleteService) {
-      this.autocompleteService =
-        new window.google.maps.places.AutocompleteService();
+      this.autocompleteService = new window.google.maps.places.AutocompleteService();
     }
   }
 
@@ -58,40 +54,36 @@ class SearchBarMap extends React.Component<
       !prevProps.isLoaded &&
       !this.autocompleteService
     ) {
-      this.autocompleteService =
-        new window.google.maps.places.AutocompleteService();
+      this.autocompleteService = new window.google.maps.places.AutocompleteService();
     }
   }
 
   handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const query = e.target.value;
     this.setState({ searchText: query, isDropdownVisible: true, loading: true });
-  
+
     if (query.length > 2 && this.autocompleteService) {
       this.autocompleteService.getPlacePredictions(
         { input: query },
         this.handlePredictions
       );
-      this.props.onNotesSearch(query); // Trigger notes search
+      this.props.onNotesSearch(query);
     } else {
       this.setState({ suggestions: [] });
       if (query.length === 0 && this.state.searchText.length > 0) {
-        this.props.onSearch(""); // Clear search results
-        this.props.onNotesSearch(""); // Reset notes search
+        this.props.onSearch("");
+        this.props.onNotesSearch("");
       }
     }
-  
   };
-
-  // Handle "Enter" key press
 
   handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
-      event?.preventDefault();
+      event.preventDefault();
       const typedLocation = this.state.searchText.trim();
       if (typedLocation) {
         this.props.onSearch(typedLocation);
-        this.setState({ isDropdownVisible: false});
+        this.setState({ isDropdownVisible: false });
       }
     }
   };
@@ -126,25 +118,24 @@ class SearchBarMap extends React.Component<
     ) {
       const lat = result.geometry.location.lat();
       const lng = result.geometry.location.lng();
-      this.props.onSearch(result.formatted_address || "", lat, lng); // Route to location
+      this.props.onSearch(result.formatted_address || "", lat, lng);
       this.setState({
         searchText: result.formatted_address || "",
         suggestions: [],
-        isDropdownVisible: false, // Hide dropdown after selection
+        isDropdownVisible: false,
       });
     }
   };
-  
 
   handleNoteSelection = (note: CombinedResult) => {
     if (note.type === "note") {
       const lat = parseFloat(note.latitude);
       const lng = parseFloat(note.longitude);
       if (!isNaN(lat) && !isNaN(lng)) {
-        this.props.onSearch(note.title, lat, lng, true); // Route to the note's pin
+        this.props.onSearch(note.title, lat, lng, true);
         this.setState({
           searchText: note.title,
-          isDropdownVisible: false, // Close the dropdown
+          isDropdownVisible: false,
         });
       }
     }
@@ -155,7 +146,6 @@ class SearchBarMap extends React.Component<
   };
 
   handleBlur = () => {
-    // Hide dropdown after a slight delay to allow clicks on suggestions
     setTimeout(() => this.setState({ isDropdownVisible: false }), 200);
   };
 
@@ -163,7 +153,17 @@ class SearchBarMap extends React.Component<
     const { searchText, suggestions, isDropdownVisible, loading } = this.state;
     const { filteredNotes } = this.props;
 
-    // Add typed location at the top of the combined list
+    const { isMapsApiLoaded } = useGoogleMaps(); // ✅ new
+
+    // ✅ graceful fallback
+    if (!isMapsApiLoaded) {
+      return (
+        <div className="p-4 bg-yellow-100 border border-yellow-300 rounded text-yellow-800">
+          Map service is currently unavailable. Please use the list view to browse notes.
+        </div>
+      );
+    }
+
     const typedLocation = searchText
       ? [
           {
@@ -174,46 +174,34 @@ class SearchBarMap extends React.Component<
         ]
       : [];
 
-      const combinedResults: CombinedResult[] = [
-        ...typedLocation.map((location) => ({
-          ...location,
-          matched_substrings: [],
-          structured_formatting: {
-            main_text: location.description,
-            main_text_matched_substrings: [], // Add this to fulfill the requirement
-            secondary_text: "",
-          },
-          terms: [],
-          types: [],
-          type: "suggestion" as const,
+    const combinedResults: CombinedResult[] = [
+      ...typedLocation.map((location) => ({
+        ...location,
+        matched_substrings: [],
+        structured_formatting: {
+          main_text: location.description,
+          main_text_matched_substrings: [],
+          secondary_text: "",
+        },
+        terms: [],
+        types: [],
+        type: "suggestion" as const,
+      })),
+      ...suggestions.map((s) => ({
+        ...s,
+        type: "suggestion" as const,
+      })),
+      ...filteredNotes
+        .filter((note) => note && note.title)
+        .map((note) => ({
+          ...note,
+          type: "note" as const,
         })),
-        ...suggestions.map((s) => ({
-          ...s,
-          type: "suggestion" as const,
-        })),
-        ...filteredNotes
-          .filter((note) => note && note.title) // Ensure note is valid
-          .map((note) => ({
-            ...note,
-            type: "note" as const,
-          })),
-      ];
-      
+    ];
 
-    // Sort combined results alphabetically
     combinedResults.sort((a, b) => {
-      const textA =
-        "description" in a
-          ? a.description || ""
-          : a.title && typeof a.title === "string"
-          ? a.title
-          : "";
-      const textB =
-        "description" in b
-          ? b.description || ""
-          : b.title && typeof b.title === "string"
-          ? b.title
-          : "";
+      const textA = "description" in a ? a.description || "" : a.title || "";
+      const textB = "description" in b ? b.description || "" : b.title || "";
       return textA.localeCompare(textB);
     });
 
@@ -222,9 +210,9 @@ class SearchBarMap extends React.Component<
         <SearchBarUI
           searchText={this.state.searchText}
           onInputChange={this.handleInputChange}
-          className="p-2 rounded-md border border-gray-300 focus:outline-none focus: ring-2 focus:ring-blue-500"
+          className="p-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        {isDropdownVisible &&  (
+        {isDropdownVisible && (
           <ul
             ref={this.dropdownRef}
             id="autocomplete-suggestions"
@@ -236,54 +224,51 @@ class SearchBarMap extends React.Component<
                 <span className="ml-2">Loading...</span>
               </li>
             )}
-            {!loading && combinedResults.length > 0 && (
-            combinedResults.map((result, index) => {
-              const isSuggestion = result.type === "suggestion";
-              const key = isSuggestion ? result.place_id : result.id;
-              const onClickHandler = () => {
-                if (isSuggestion) {
-                  if (result.place_id === "typed-location") {
-                    // Handle the typed location click
-                    this.props.onSearch(result.description);
-                    this.setState({
-                      searchText: result.description,
-                      isDropdownVisible: false,
-                    });
-                  } else {
-                    this.handleSelectSuggestion(result.place_id);
-                  }
-                } else {
-                  // Handle note selection
-                  this.handleNoteSelection(result);
-                }
-              };
-
-              const displayText = isSuggestion
-                ? result.description
-                : result.title;
-
-              return (
-                <li
-                  key={key}
-                  className="flex items-center px-4 py-2 hover:bg-blue-100 cursor-pointer transition-colors"
-                  onClick={onClickHandler}
-                  role="option"
-                  aria-selected="false"
-                >
-                  <img
-                    src={
-                      isSuggestion
-                        ? "/autocomplete_map_pin.png"
-                        : "/autocomplete_search_icon.png"
+            {!loading &&
+              combinedResults.map((result, index) => {
+                const isSuggestion = result.type === "suggestion";
+                const key = isSuggestion ? result.place_id : result.id;
+                const onClickHandler = () => {
+                  if (isSuggestion) {
+                    if (result.place_id === "typed-location") {
+                      this.props.onSearch(result.description);
+                      this.setState({
+                        searchText: result.description,
+                        isDropdownVisible: false,
+                      });
+                    } else {
+                      this.handleSelectSuggestion(result.place_id);
                     }
-                    alt={isSuggestion ? "Map Pin" : "Search Icon"}
-                    className="h-4 w-4 mr-2"
-                  />
-                  {displayText}
-                </li>
-              );
-            })
-            )}
+                  } else {
+                    this.handleNoteSelection(result);
+                  }
+                };
+
+                const displayText = isSuggestion
+                  ? result.description
+                  : result.title;
+
+                return (
+                  <li
+                    key={key}
+                    className="flex items-center px-4 py-2 hover:bg-blue-100 cursor-pointer transition-colors"
+                    onClick={onClickHandler}
+                    role="option"
+                    aria-selected="false"
+                  >
+                    <img
+                      src={
+                        isSuggestion
+                          ? "/autocomplete_map_pin.png"
+                          : "/autocomplete_search_icon.png"
+                      }
+                      alt={isSuggestion ? "Map Pin" : "Search Icon"}
+                      className="h-4 w-4 mr-2"
+                    />
+                    {displayText}
+                  </li>
+                );
+              })}
           </ul>
         )}
       </div>
@@ -292,5 +277,3 @@ class SearchBarMap extends React.Component<
 }
 
 export default SearchBarMap;
-
-

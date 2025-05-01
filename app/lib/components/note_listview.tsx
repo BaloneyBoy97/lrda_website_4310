@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { Note } from "../../types";
 import { format12hourTime } from "../utils/data_conversion";
+import ApiService from "../utils/api_service";
+
+const BATCH_SIZE = 20;
 
 type NoteListViewProps = {
-  notes: Note[];
   onNoteSelect: (note: Note, isNewNote: boolean) => void;
 };
 
@@ -13,20 +15,34 @@ const extractTextFromHtml = (htmlString: string) => {
   return tempDivElement.textContent || tempDivElement.innerText || "";
 };
 
-const NoteListView: React.FC<NoteListViewProps> = ({ notes, onNoteSelect }) => {
+const NoteListView: React.FC<NoteListViewProps> = ({ onNoteSelect }) => {
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [skip, setSkip] = useState(0);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [fresh, setFresh] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
-  const visibleNotes = notes.filter(note => !note.isArchived); //filter out archived notes
-  
+  const fetchNotesBatch = async () => {
+    setLoading(true);
+    const newNotes = await ApiService.fetchPublishedNotes(BATCH_SIZE, skip);
+    if (newNotes.length < BATCH_SIZE) {
+      setHasMore(false;
+    }
+    setNotes(prev => [...prev, ...newNotes]);
+    setSkip(prev => prev + BATCH_SIZE);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    if (visibleNotes.length > 0 && fresh) {
-      onNoteSelect(visibleNotes[0], false);
-      setSelectedNoteId(visibleNotes[0].id);
-      setFresh(false);
+    fetchNotesBatch();
+  }, []);
+
+  useEffect(() => {
+    if (notes.length > 0 && !selectedNoteId) {
+      onNoteSelect(notes[0], false);
+      setSelectedNoteId(notes[0].id);
     }
-  }, [visibleNotes, onNoteSelect, fresh]);
+  }, [notes]);
 
   const handleLoadText = (note: Note) => {
     onNoteSelect(note, false);
@@ -37,24 +53,20 @@ const NoteListView: React.FC<NoteListViewProps> = ({ notes, onNoteSelect }) => {
     const currentDate = new Date();
     currentDate.setHours(0, 0, 0, 0);
 
-    const checkDate = new Date(inputDate.getTime());
+    const checkDate = new Date(inputDate);
     checkDate.setHours(0, 0, 0, 0);
     const dayDifference = (currentDate.getTime() - checkDate.getTime()) / (1000 * 60 * 60 * 24);
 
-    if (dayDifference === 0) {
-      return format12hourTime(inputDate);
-    } else if (dayDifference === 1) {
-      return "Yesterday";
-    } else {
-      return inputDate.toLocaleDateString();
-    }
+    if (dayDifference === 0) return format12hourTime(inputDate);
+    else if (dayDifference === 1) return "Yesterday";
+    else return inputDate.toLocaleDateString();
   };
 
   return (
-    <div id="notes-list" className="my-4 flex flex-col">
-      {visibleNotes.map((note) => {
+    <div className="my-4 flex flex-col" id="notes-list">
+      {notes.map((note) => {
         const noteTextContent = extractTextFromHtml(note.text);
-  
+        if (note.isArchived) return null;
         return (
           <div
             key={note.id}
@@ -66,19 +78,26 @@ const NoteListView: React.FC<NoteListViewProps> = ({ notes, onNoteSelect }) => {
             onClick={() => handleLoadText(note)}
           >
             <div className="flex flex-col">
-              <div className="flex flex-row items-center text-center justify-between">
+              <div className="flex flex-row items-center justify-between">
                 <h3 className="text-lg font-semibold truncate">{note.title}</h3>
-                <h3 className="text-sm font-semibold">
-                  {handleGetTime(note.time)}
-                </h3>
+                <h3 className="text-sm font-semibold">{handleGetTime(note.time)}</h3>
               </div>
               <p className="text-sm truncate">{noteTextContent}</p>
             </div>
           </div>
         );
       })}
+      {hasMore && (
+        <button
+          className="mx-auto mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          onClick={fetchNotesBatch}
+          disabled={loading}
+        >
+          {loading ? "Loading..." : "Load More"}
+        </button>
+      )}
     </div>
-  );  
+  );
 };
 
 export default NoteListView;
