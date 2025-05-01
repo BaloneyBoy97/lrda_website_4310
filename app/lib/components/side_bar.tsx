@@ -162,10 +162,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onNoteSelect }) => {
         </div>
 
       <div>
-        <NoteListView
-          notes={filteredNotes}
-          onNoteSelect={(note) => onNoteSelect(note, false)}
-        />
+        <NoteListView onNoteSelect={(note) => onNoteSelect(note, false)} />
       </div>
 
       {/* floating add note button */}

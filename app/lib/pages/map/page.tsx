@@ -1,786 +1,204 @@
 "use client";
-import React, { useEffect, useState, useRef } from "react";
-import { GoogleMap } from "@react-google-maps/api";
-import SearchBarMap from "../../components/search_bar_map";
-import { Note, newNote } from "@/app/types";
-import ApiService from "../../utils/api_service";
-import DataConversion from "../../utils/data_conversion";
-import { User } from "../../models/user_class";
-import ClickableNote from "../../components/click_note_card";
-import { Switch } from "@/components/ui/switch";
-import { Skeleton } from "@/components/ui/skeleton";
-import introJs from "intro.js"
-import "intro.js/introjs.css"
-// import "../../../globals.css";
-
-
-import {
-  CompassIcon,
-  GlobeIcon,
-  LocateIcon,
-  Navigation,
-  UserIcon,
-} from "lucide-react";
-import * as ReactDOM from "react-dom/client";
-import { toast } from "sonner";
-import { MarkerClusterer } from "@googlemaps/markerclusterer";
-import { getItem, setItem } from "../../utils/async_storage";
+import React, { useState, useRef, useEffect } from "react";
+import SearchBarUI from "@/app/lib/components/search_bar_ui";
+import { Note, CombinedResult } from "../../../types";
 import { useGoogleMaps } from "../../utils/GoogleMapsContext";
 
-interface Location {
-  lat: number;
-  lng: number;
-}
-
-interface Refs {
-  [key: string]: HTMLElement | undefined;
-}
-
-const Page = () => {
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [filteredNotes, setFilteredNotes] = useState<Note[]>([]);
-  const [activeNote, setActiveNote] = useState<Note | null>(null);
-  const [personalNotes, setPersonalNotes] = useState<Note[]>([]);
-  const [isNoteSelectedFromSearch, setIsNoteSelectedFromSearch] = useState(false);
-  const [globalNotes, setGlobalNotes] = useState<Note[]>([]);
-  const [global, setGlobal] = useState(true);
-  const [mapCenter, setMapCenter] = useState<Location>({
-    lat: 38.005984,
-    lng: -24.334449,
-  });
-  const [mapZoom, setMapZoom] = useState(2);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isLoading, setIsLoaded] = useState(true);
-  const [locationFound, setLocationFound] = useState(false);
-  const [hoveredNoteId, setHoveredNoteId] = useState<string | null>(null);
-  const [mapBounds, setMapBounds] = useState<google.maps.LatLngBounds | null>(
-    null
-  );
-  const mapRef = useRef<google.maps.Map>();
-  const markerClustererRef = useRef<MarkerClusterer>();
-  const [emptyRegion, setEmptyRegion] = useState(false);
-  const noteRefs = useRef<Refs>({});
-  const [currentPopup, setCurrentPopup] = useState<any | null>(null);
-  const [markers, setMarkers] = useState(new Map());
-  const [skip, setSkip] = useState(0);
-
-  const user = User.getInstance();
-  const { isMapsApiLoaded } = useGoogleMaps();
-
-  const handleNoteSelect = (note: Note | newNote, isNewNote: boolean) => {
-    if (isNewNote) {
-      // Create a new Note from the newNote template, assigning default values for missing fields.
-      const newNoteWithDefaults: Note = {
-        ...note, // Spread existing newNote fields
-        id: "temporary-id", // Assign a temporary ID for new note
-        uid: "temporary-uid", // Assign a temporary UID
-      };
-      console.log("New note created:", newNoteWithDefaults);
-    } else {
-      console.log("Existing note selected:", note);
-    }
-  };
-  
-
-  const searchBarRef = useRef<HTMLDivElement | null>(null);
-  const notesListRef= useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      const navbarCreateNoteButton = document.getElementById("navbar-create-note");
-      const navbarLogoutButton = document.getElementById("navbar-logout");
-  
-      if (searchBarRef.current && navbarCreateNoteButton && noteRefs && notesListRef.current) {
-        // Check if the intro has been shown before (from cookies)
-        const introShown = document.cookie
-          .split("; ")
-          .find((row) => row.startsWith("introShown="))
-          ?.split("=")[1];
-  
-        if (!introShown) {
-          const intro = introJs();
-  
-          intro.setOptions({
-            steps: [
-              {
-                element: noteRefs.current?.current,
-                intro: "Welcome! Let's explore the website together.",
-              },
-              {
-                element: searchBarRef.current,
-                intro: "First, here's the search bar. You can use it to help you find locations on the map.",
-              },
-              {
-                element: notesListRef.current,
-                intro: "Now, this is the notes list. You can use it to explore other people's notes!",
-              },
-              {
-                element: navbarCreateNoteButton,
-                intro: "Click here to create your own note!",
-              },
-              {
-                element: navbarLogoutButton,
-                intro: "Done for the day? Make sure to logout!",
-              },
-            ],
-            scrollToElement: true,
-            skipLabel: "Skip", // Change the look of this button
-          });
-  
-          // When the user skips or completes the intro
-          intro.oncomplete(() => {
-            document.cookie = "introShown=true; path=/; max-age=31536000"; // 1 year expiry
-          });
-  
-          intro.onexit(() => {
-            document.cookie = "introShown=true; path=/; max-age=31536000"; // 1 year expiry
-          });
-  
-          intro.start();
-  
-          // Apply inline styling to the skip button after a short delay to ensure it has rendered
-          setTimeout(() => {
-            const skipButton = document.querySelector(".introjs-skipbutton") as HTMLElement;
-            if (skipButton) {
-              skipButton.style.position = "absolute";
-              skipButton.style.top = "2px"; // Move it up by decreasing the top value
-              skipButton.style.right = "20px"; // Adjust positioning as needed
-              skipButton.style.fontSize = "18px"; // Adjust font size as needed
-              skipButton.style.padding = "4px 10px"; // Adjust padding as needed
-            }
-          }, 100); // 100ms delay to wait for rendering
-        }
-  
-        observer.disconnect(); // Stop observing once the elements are found
-      }
-    });
-  
-    // Start observing the body for changes
-    observer.observe(document.body, { childList: true, subtree: true });
-  
-    // Cleanup the observer when the component unmounts
-    return () => {
-      observer.disconnect();
-    };
-  }, [searchBarRef, noteRefs, notesListRef]);
-  
-
-  useEffect(() => {
-    let isSubscribed = true;
-    const fetchLastLocation = async () => {
-      try {
-        const lastLocationString = await getItem("LastLocation");
-        const lastLocation = lastLocationString
-          ? JSON.parse(lastLocationString)
-          : null;
-        if (isSubscribed) {
-          setMapCenter(lastLocation);
-          setMapZoom(10);
-          setLocationFound(true);
-        }
-      } catch (error) {
-        const defaultLocation = { lat: 38.637334, lng: -90.286021 };
-        setMapCenter(defaultLocation as Location);
-        setMapZoom(10);
-        setLocationFound(true);
-        console.error("Failed to fetch the last location", error);
-      }
-    };
-    fetchLastLocation();
-    return () => {
-      isSubscribed = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let isComponentMounted = true;
-
-    const fetchCurrentLocationAndUpdate = async () => {
-      try {
-        const currentLocation = (await getLocation()) as Location;
-        if (!locationFound && isComponentMounted) {
-          setMapCenter(currentLocation);
-          setMapZoom(10);
-        }
-        await setItem("LastLocation", JSON.stringify(currentLocation));
-      } catch (error) {
-        if (isComponentMounted) {
-          const defaultLocation = { lat: 38.637334, lng: -90.286021 };
-          setMapCenter(defaultLocation);
-          setMapZoom(10);
-          setLocationFound(true);
-          console.log("Using last known location due to error:", error);
-        }
-      }
-    };
-
-    fetchCurrentLocationAndUpdate();
-
-    return () => {
-      isComponentMounted = false;
-    };
-  }, [locationFound]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-
-    if (map) {
-      const mapClickListener = map.addListener("click", () => {
-        setActiveNote(null);
-      });
-
-      const mapDragListener = map.addListener("dragstart", () => {
-        setActiveNote(null);
-      });
-
-      return () => {
-        google.maps.event.removeListener(mapClickListener);
-        google.maps.event.removeListener(mapDragListener);
-      };
-    }
-  }, []);
-
-  useEffect(() => {
-    const currentNotes = global ? globalNotes : personalNotes;
-    if (!isNoteSelectedFromSearch) {
-      updateFilteredNotes(mapCenter, mapBounds, currentNotes);
-    }
-    const timer = setTimeout(() => {
-      if (filteredNotes.length < 1) {
-        setEmptyRegion(true);
-      }
-    }, 2000);
-    setIsLoaded(false);
-    return () => clearTimeout(timer);
-  }, [mapCenter, mapZoom, mapBounds, globalNotes, personalNotes, global]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (map) {
-      const mapClickListener = map.addListener("click", handleMapClick);
-      return () => google.maps.event.removeListener(mapClickListener);
-    }
-  }, []);
-
-  useEffect(() => {
-    markers.forEach((marker, noteId) => {
-      const isHovered = hoveredNoteId === noteId;
-      marker.setIcon(createMarkerIcon(isHovered));
-      marker.setZIndex(isHovered ? google.maps.Marker.MAX_ZINDEX + 1 : null);
-    });
-  }, [hoveredNoteId, markers]);
-
-  useEffect(() => {
-    if (locationFound) {
-      fetchNotes().then(({ personalNotes, globalNotes }) => {
-        setPersonalNotes(personalNotes);
-        setGlobalNotes(globalNotes);
-
-        const initialNotes = global ? globalNotes : personalNotes;
-        setNotes(initialNotes);
-      });
-    }
-  }, [locationFound, global]);
-
-  useEffect(() => {
-    if (isMapsApiLoaded && mapRef.current && filteredNotes.length > 0) {
-      const tempMarkers = new Map();
-
-      const attachMarkerEvents = (marker: google.maps.Marker, note: Note) => {
-        google.maps.event.clearListeners(marker, "click");
-        google.maps.event.clearListeners(marker, "mouseover");
-        google.maps.event.clearListeners(marker, "mouseout");
-
-        marker.addListener("click", () => handleMarkerClick(note));
-
-        marker.addListener("mouseover", () => {
-          setHoveredNoteId(note.id);
-          scrollToNoteTile(note.id);
-          setActiveNote(note);
-          marker.setIcon(createMarkerIcon(true));
-        });
-
-        marker.addListener("mouseout", () => {
-          setHoveredNoteId(null);
-          setActiveNote(null);
-          marker.setIcon(createMarkerIcon(false));
-        });
-      };
-
-      filteredNotes.forEach((note) => {
-        const marker = new google.maps.Marker({
-          position: new google.maps.LatLng(
-            parseFloat(note.latitude),
-            parseFloat(note.longitude)
-          ),
-          icon: createMarkerIcon(false),
-        });
-
-        attachMarkerEvents(marker, note);
-        tempMarkers.set(note.id, marker);
-      });
-
-      setMarkers(tempMarkers);
-
-      if (markerClustererRef.current) {
-        markerClustererRef.current.clearMarkers();
-      }
-
-      markerClustererRef.current = new MarkerClusterer({
-        markers: Array.from(tempMarkers.values()),
-        map: mapRef.current,
-      });
-
-      setIsLoaded(false);
-
-      return () => {
-        if (markerClustererRef.current) {
-          markerClustererRef.current.clearMarkers();
-        }
-      };
-    }
-  }, [isMapsApiLoaded, filteredNotes, mapRef.current]);
-
-  const handleMapClick = () => {
-    if (currentPopup) {
-      currentPopup.setMap(null);
-    }
-    setCurrentPopup(null);
-    setActiveNote(null);
-  };
-
-  const onMapLoad = React.useCallback((map: any) => {
-    console.log("Map loaded:", map);
-    mapRef.current = map;
-
-    const updateBounds = () => {
-      const newCenter: Location = {
-        lat: map.getCenter()?.lat() || "",
-        lng: map.getCenter()?.lng() || "",
-      };
-      const newBounds = map.getBounds();
-      setMapCenter(newCenter);
-      setMapBounds(newBounds);
-    };
-
-    map.addListener("dragend", updateBounds);
-    map.addListener("zoom_changed", () => {
-      updateBounds();
-    });
-
-    setTimeout(() => {
-      updateBounds();
-    }, 100);
-  }, []);
-
-  const filterNotesByMapBounds = (
-    bounds: google.maps.LatLngBounds | null,
-    notes: Note[]
-  ): Note[] => {
-    if (!bounds) return notes;
-
-    const ne = bounds.getNorthEast();
-    const sw = bounds.getSouthWest();
-
-    const returnVal = notes.filter((note) => {
-      const lat = parseFloat(note.latitude);
-      const lng = parseFloat(note.longitude);
-      return (
-        lat >= sw.lat() && lat <= ne.lat() && lng >= sw.lng() && lng <= ne.lng()
-      );
-    });
-    return returnVal;
-  };
-
-  const updateFilteredNotes = async (
-    center: Location,
-    bounds: google.maps.LatLngBounds | null,
-    allNotes: Note[]
-  ) => {
-    const visibleNotes = filterNotesByMapBounds(bounds, allNotes);
-    setFilteredNotes(visibleNotes);
-    setIsLoaded(false);
-  };
-
-  const fetchNotes = async () => {
-    try {
-      const userId = await user.getId();
-  
-      let personalNotes: Note[] = [];
-      let globalNotes: Note[] = [];
-      if (userId) {
-        setIsLoggedIn(true);
-        personalNotes = (await ApiService.fetchUserMessages(userId)).filter(note => !note.isArchived); //filter here?
-
-        // Convert media types and filter out archived notes for personal notes
-        personalNotes = DataConversion.convertMediaTypes(personalNotes)
-        .reverse()
-        .filter(note => !note.isArchived); // Filter out archived personal notes
-      }
-
-      globalNotes = (await ApiService.fetchPublishedNotes()).filter(note => !note.isArchived);
-
-
-      // Convert media types and filter out archived notes for global notes
-      globalNotes = DataConversion.convertMediaTypes(globalNotes)
-        .reverse()
-        .filter(note => !note.isArchived); // Filter out archived global notes
-
-
-
-      return { personalNotes, globalNotes };
-    } catch (error) {
-      console.error("Error fetching messages:", error);
-      return { personalNotes: [], globalNotes: [] };
-    }
-  };  
-
-  const handleMarkerClick = (note: Note) => {
-    if (currentPopup) {
-      currentPopup.setMap(null);
-      setCurrentPopup(null);
-    }
-
-    setActiveNote(note);
-    scrollToNoteTile(note.id);
-
-    const map = mapRef.current;
-
-    if (map) {
-      const popupContent = document.createElement("div");
-      const root = ReactDOM.createRoot(popupContent);
-      root.render(<ClickableNote note={note} />);
-
-      class Popup extends google.maps.OverlayView {
-        position: google.maps.LatLng;
-        containerDiv: HTMLDivElement;
-
-        constructor(position: google.maps.LatLng, content: HTMLElement) {
-          super();
-          this.position = position;
-
-          content.classList.add("popup-bubble");
-
-          const bubbleAnchor = document.createElement("div");
-
-          bubbleAnchor.classList.add("popup-bubble-anchor");
-          bubbleAnchor.appendChild(content);
-
-          this.containerDiv = document.createElement("div");
-          this.containerDiv.classList.add("popup-container");
-          this.containerDiv.appendChild(bubbleAnchor);
-
-          Popup.preventMapHitsAndGesturesFrom(this.containerDiv);
-        }
-
-        onAdd() {
-          this.getPanes()!.floatPane.appendChild(this.containerDiv);
-        }
-
-        onRemove() {
-          if (this.containerDiv.parentElement) {
-            this.containerDiv.parentElement.removeChild(this.containerDiv);
-          }
-        }
-
-        draw() {
-          const divPosition = this.getProjection().fromLatLngToDivPixel(
-            this.position
-          )!;
-
-          const display =
-            Math.abs(divPosition.x) < 4000 && Math.abs(divPosition.y) < 4000
-              ? "block"
-              : "none";
-
-          if (display === "block") {
-            this.containerDiv.style.left = divPosition.x + "px";
-            this.containerDiv.style.top = divPosition.y + "px";
-          }
-
-          if (this.containerDiv.style.display !== display) {
-            this.containerDiv.style.display = display;
-          }
-        }
-      }
-
-      let popup = new Popup(
-        new google.maps.LatLng(
-          parseFloat(note.latitude),
-          parseFloat(note.longitude)
-        ),
-        popupContent
-      );
-
-      setCurrentPopup(popup);
-
-      popup.setMap(map);
-    }
-  };
-
-  const handleSearch = (
+interface SearchBarMapProps {
+  onSearch: (
     address: string,
     lat?: number,
     lng?: number,
     isNoteClick?: boolean
+  ) => void;
+  onNotesSearch: (searchText: string) => void;
+  isLoaded: boolean;
+  filteredNotes?: Note[]; // make optional
+}
+
+const SearchBarMap: React.FC<SearchBarMapProps> = ({
+  onSearch,
+  onNotesSearch,
+  isLoaded,
+  filteredNotes = [], // ✅ default fallback
+}) => {
+  const [searchText, setSearchText] = useState("");
+  const [suggestions, setSuggestions] = useState<google.maps.places.AutocompletePrediction[]>([]);
+  const [isDropdownVisible, setIsDropdownVisible] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const autocompleteService = useRef<google.maps.places.AutocompleteService | null>(null);
+  const dropdownRef = useRef<HTMLUListElement>(null);
+
+  const { isMapsApiLoaded } = useGoogleMaps();
+
+  useEffect(() => {
+    if (window.google?.maps?.places && !autocompleteService.current) {
+      autocompleteService.current = new window.google.maps.places.AutocompleteService();
+    }
+  }, [isMapsApiLoaded]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    setSearchText(query);
+    setIsDropdownVisible(true);
+    setLoading(true);
+
+    if (query.length > 2 && autocompleteService.current) {
+      autocompleteService.current.getPlacePredictions({ input: query }, handlePredictions);
+      onNotesSearch(query);
+    } else {
+      setSuggestions([]);
+      if (query.length === 0) {
+        onSearch("");
+        onNotesSearch("");
+      }
+    }
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const typedLocation = searchText.trim();
+      if (typedLocation) {
+        onSearch(typedLocation);
+        setIsDropdownVisible(false);
+      }
+    }
+  };
+
+  const handlePredictions = (
+    predictions: google.maps.places.AutocompletePrediction[] | null,
+    status: google.maps.places.PlacesServiceStatus
   ) => {
-    if (isNoteClick) {
-      setIsNoteSelectedFromSearch(true);
+    if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+      setSuggestions(predictions);
     } else {
-      setIsNoteSelectedFromSearch(false);
-      const query = address.trim().toLowerCase();
-      const filtered = query
-        ? notes.filter((note) => {
-            const titleMatch =
-              note.title && typeof note.title === "string"
-                ? note.title.toLowerCase().includes(query)
-                : false;
-  
-            const textMatch =
-              note.text && typeof note.text === "string"
-                ? note.text.toLowerCase().includes(query)
-                : false;
-  
-            const tagsMatch =
-              Array.isArray(note.tags) &&
-              note.tags.some(
-                (tag) =>
-                  tag.label &&
-                  typeof tag.label === "string" &&
-                  tag.label.toLowerCase().includes(query)
-              );
-  
-            return titleMatch || textMatch || tagsMatch;
-          })
-        : [...notes];
-  
-      setFilteredNotes(filtered);
+      setSuggestions([]);
     }
-  
-    if (lat !== undefined && lng !== undefined) {
-      const newCenter = { lat, lng };
-      mapRef.current?.panTo(newCenter);
-      mapRef.current?.setZoom(10);
-    }
-  };
-  
-
-  const handleNotesSearch = (searchText: string) => {
-    const query = searchText.toLowerCase();
-    const filtered = notes.filter((note) => {
-      const titleMatch =
-        note.title && typeof note.title === "string"
-          ? note.title.toLowerCase().includes(query)
-          : false;
-  
-      const tagsMatch =
-        Array.isArray(note.tags) &&
-        note.tags.some(
-          (tag) =>
-            tag.label &&
-            typeof tag.label === "string" &&
-            tag.label.toLowerCase().includes(query)
-        );
-  
-      return titleMatch || tagsMatch;
-    });
-  
-    setFilteredNotes(filtered);
-    console.log("Filtered:", filtered);
-  };
-  
-
-  function createMarkerIcon(isHighlighted: boolean) {
-    if (isHighlighted) {
-      return {
-        url: "/markerG.png",
-        scaledSize: new window.google.maps.Size(48, 48),
-      };
-    } else {
-      return {
-        url: "/markerR.png",
-        scaledSize: new window.google.maps.Size(40, 40),
-      };
-    }
-  }
-
-  const toggleFilter = () => {
-    setGlobal(!global);
-    const notesToUse = !global ? globalNotes : personalNotes;
-    setNotes(notesToUse);
-    setFilteredNotes(notesToUse);
-    setIsLoaded(false);
+    setLoading(false);
   };
 
-  const scrollToNoteTile = (noteId: string) => {
-    const noteTile = noteRefs.current[noteId];
-    if (noteTile) {
-      noteTile.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const handleSelectSuggestion = (placeId: string) => {
+    if (isLoaded && window.google?.maps?.places) {
+      const placesService = new window.google.maps.places.PlacesService(document.createElement("div"));
+      placesService.getDetails({ placeId }, handlePlaceDetails);
     }
   };
 
-  function getLocation() {
-    toast("Fetching Location", {
-      description: "Getting your location. This can take a second.",
-      duration: 3000,
-    });
-    return new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const newCenter = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          };
-          resolve(newCenter);
-        },
-        (error) => {
-          console.error("Error fetching location", error);
-          reject(error);
-        }
-      );
-    });
-  }
-
-  async function handleSetLocation() {
-    try {
-      const newCenter = await getLocation();
-      setMapCenter(newCenter as Location);
-      mapRef.current?.panTo(newCenter as Location);
-      mapRef.current?.setZoom(13);
-    } catch (error) {
-      console.error("Failed to set location", error);
+  const handlePlaceDetails = (
+    result: google.maps.places.PlaceResult | null,
+    status: google.maps.places.PlacesServiceStatus
+  ) => {
+    if (
+      status === google.maps.places.PlacesServiceStatus.OK &&
+      result?.geometry?.location
+    ) {
+      const lat = result.geometry.location.lat();
+      const lng = result.geometry.location.lng();
+      onSearch(result.formatted_address || "", lat, lng);
+      setSearchText(result.formatted_address || "");
+      setSuggestions([]);
+      setIsDropdownVisible(false);
     }
-  }
-
-  const handleNext = async () => {
-    const newSkip = skip + 150;
-    const newNotes = global
-      ? await ApiService.fetchMessages(true, true, '', 150, newSkip)
-      : await ApiService.fetchMessages(false, false, (await user.getId()) || '', 150, newSkip);
-  
-    if (newNotes.length === 0) {
-      toast("No more notes to display");
-      return;
-    }
-    
-    setFilteredNotes(newNotes);
-    setSkip(newSkip);
   };
-  
-  const handlePrevious = async () => {
-    const newSkip = Math.max(0, skip - 150);
-    const newNotes = global
-      ? await ApiService.fetchMessages(true, true, '', 150, newSkip)
-      : await ApiService.fetchMessages(false, false, (await user.getId()) || '', 150, newSkip);
-  
-    if (newNotes.length === 0) {
-      toast("No more notes to display");
-      return;
+
+  const handleNoteSelection = (note: CombinedResult) => {
+    if (note.type === "note") {
+      const lat = parseFloat(note.latitude);
+      const lng = parseFloat(note.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        onSearch(note.title, lat, lng, true);
+        setSearchText(note.title);
+        setIsDropdownVisible(false);
+      }
     }
-    
-    setFilteredNotes(newNotes);
-    setSkip(newSkip);
   };
-  
+
+  const handleFocus = () => setIsDropdownVisible(true);
+  const handleBlur = () => setTimeout(() => setIsDropdownVisible(false), 200);
+
+  const typedLocation = searchText
+    ? [{ description: searchText, place_id: "typed-location", type: "suggestion" as const }]
+    : [];
+
+  const combinedResults: CombinedResult[] = [
+    ...typedLocation.map((loc) => ({
+      ...loc,
+      matched_substrings: [],
+      structured_formatting: { main_text: loc.description, main_text_matched_substrings: [], secondary_text: "" },
+      terms: [],
+      types: [],
+    })),
+    ...suggestions.map((s) => ({ ...s, type: "suggestion" as const })),
+    ...filteredNotes.filter((n) => n && n.title).map((n) => ({ ...n, type: "note" as const })),
+  ];
+
+  combinedResults.sort((a, b) => {
+    const textA = "description" in a ? a.description || "" : a.title || "";
+    const textB = "description" in b ? b.description || "" : b.title || "";
+    return textA.localeCompare(textB);
+  });
+
   return (
-    <div className="flex flex-row w-screen h-[90vh] min-w-[600px]">
-      <div className="flex-grow">
-        {isMapsApiLoaded && (
-          <GoogleMap
-            mapContainerStyle={{ width: "100%", height: "100%" }}
-            center={mapCenter}
-            zoom={mapZoom}
-            onLoad={onMapLoad}
-            onDragStart={handleMapClick}
-            onClick={handleMapClick}
-            options={{
-              streetViewControl: false,
-              mapTypeControl: false,
-              fullscreenControl: false,
-            }}
-          >
-            <div className="absolute flex flex-row mt-3 w-full h-10 justify-between z-10">
-              <div 
-                className="flex flex-row w-[30vw] left-0 z-10 m-5 align-center items-center">
-                {/* moving search bar*/}
-                <div className="min-w-[80px] mr-3"
-                ref={searchBarRef}>
-                  <SearchBarMap
-                    onSearch={handleSearch}
-                    onNotesSearch={handleNotesSearch}
-                    isLoaded={isMapsApiLoaded}
-                    filteredNotes={filteredNotes}
-                  />
-                </div>
-                {isLoggedIn ? (
-                  <div className="flex flex-row justify-evenly items-center">
-                    <GlobeIcon className="text-primary" />
-                    <Switch onClick={toggleFilter} />
-                    <UserIcon className="text-primary" />
-                  </div>
-                ) : null}
-              </div>
-              <div
-                className="flex flex-row w-[50px] z-10 align-center items-center cursor-pointer hover:text-destructive"
-                onClick={handleSetLocation}
-              >
-                <Navigation size={20} />
-              </div>
-            </div>
-          </GoogleMap>
-        )}
-      </div>
+    <div className="flex flex-col w-full relative">
+      <SearchBarUI
+        searchText={searchText}
+        onInputChange={handleInputChange}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        className="p-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      {isDropdownVisible && (
+        <ul
+          ref={dropdownRef}
+          className="absolute z-50 w-full mt-1 rounded-md bg-white shadow-lg max-h-60 overflow-auto top-full"
+        >
+          {loading && (
+            <li className="flex items-center px-4 py-2 text-gray-500">
+              <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-blue-500"></div>
+              <span className="ml-2">Loading...</span>
+            </li>
+          )}
+          {!loading && combinedResults.map((result) => {
+            const isSuggestion = result.type === "suggestion";
+            const key = isSuggestion ? result.place_id : result.id;
+            const displayText = isSuggestion ? result.description : result.title;
 
-      <div className="h-full overflow-y-auto bg-white grid grid-cols-1 lg:grid-cols-2 gap-2 p-2"
-      ref = {notesListRef}>
-        {isLoading
-          ? [...Array(6)].map((_, index) => (
-              <Skeleton
-                key={index}
-                className="w-64 h-[300px] rounded-sm flex flex-col border border-gray-200"
-              />
-            ))
-          : filteredNotes.length > 0
-          ? filteredNotes.map((note) => (
-              <div
-                ref={(el) => {
-                  if (el) noteRefs.current[note.id] = el;
-                }}
-                className={`transition-transform duration-300 ease-in-out cursor-pointer max-h-[308px] max-w-[265px] ${
-                  note.id === activeNote?.id
-                    ? "active-note"
-                    : "hover:scale-105 hover:shadow-lg hover:bg-gray-200"
-                }`}
-                onMouseEnter={() => setHoveredNoteId(note.id)}
-                onMouseLeave={() => setHoveredNoteId(null)}
-                key={note.id}
+            const onClick = () => {
+              if (isSuggestion) {
+                if (result.place_id === "typed-location") {
+                  onSearch(result.description);
+                  setSearchText(result.description);
+                  setIsDropdownVisible(false);
+                } else {
+                  handleSelectSuggestion(result.place_id);
+                }
+              } else {
+                handleNoteSelection(result);
+              }
+            };
+
+            return (
+              <li
+                key={key}
+                className="flex items-center px-4 py-2 hover:bg-blue-100 cursor-pointer transition-colors"
+                onClick={onClick}
               >
-                <ClickableNote note={note} />
-              </div>
-            ))
-          : [...Array(6)].map((_, index) => (
-              <Skeleton
-                key={index}
-                className="w-64 h-[300px] rounded-sm flex flex-col border border-gray-200"
-              />
-            ))}
-        {/* <div className="flex justify-center w-full mt-4 mb-2">
-          <button
-            className="mx-2 px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-700 transition-colors"
-            onClick={handlePrevious}
-            disabled={skip === 0}
-          >
-            Previous
-          </button>
-          <button
-            className="mx-2 px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-700 transition-colors"
-            onClick={handleNext}
-          >
-            Next
-          </button>
-        </div> */}
-      </div>
+                <img
+                  src={isSuggestion ? "/autocomplete_map_pin.png" : "/autocomplete_search_icon.png"}
+                  alt={isSuggestion ? "Map Pin" : "Search Icon"}
+                  className="h-4 w-4 mr-2"
+                />
+                {displayText}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 };
 
-export default Page;
+export default SearchBarMap;
