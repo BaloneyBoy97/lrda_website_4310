@@ -26,7 +26,7 @@ const NoteListView: React.FC<NoteListViewProps> = ({ onNoteSelect }) => {
     setLoading(true);
     const newNotes = await ApiService.fetchPublishedNotes(BATCH_SIZE, skip);
     if (newNotes.length < BATCH_SIZE) {
-      setHasMore(false;
+      setHasMore(false);
     }
     setNotes(prev => [...prev, ...newNotes]);
     setSkip(prev => prev + BATCH_SIZE);
